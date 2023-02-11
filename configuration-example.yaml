@@ -1,0 +1,10 @@
+---
+netunicorn.connector.salt.public_grains:
+  - location
+  - osarch
+  - kernel
+
+netunicorn.connector.salt.master_opts: "/etc/salt/master"
+
+
+
