@@ -143,6 +143,12 @@ class SaltConnector(NetunicornConnectorProtocol):
     async def _start_deploying_shell_execution(
         self, deployment: Deployment
     ) -> dict[str, Result[None, str]]:
+        if not deployment.environment_definition.commands:
+            self.logger.debug(
+                f"Deployment of executor {deployment.executor_id} to node {deployment.node} successful, no commands to execute"
+            )
+            return {deployment.executor_id: Success(None)}
+
         try:
             results = [
                 self.local.cmd(
