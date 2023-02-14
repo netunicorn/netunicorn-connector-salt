@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from typing import Optional
+from typing import Optional, Tuple
 
 import salt.config
 import salt.runner
@@ -20,7 +20,7 @@ from netunicorn.director.infrastructure.connectors.protocol import (
 from netunicorn.director.infrastructure.connectors.types import StopExecutorRequest
 
 
-class SaltConnector(NetunicornConnectorProtocol):
+class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
     def __init__(
         self,
         connector_name: str,
@@ -32,8 +32,10 @@ class SaltConnector(NetunicornConnectorProtocol):
         self.config_file = config_file
         self.netunicorn_gateway = netunicorn_gateway
 
-        with open(config_file, "r") as f:
-            self.config = yaml.safe_load(f)
+        self.config = {}
+        if config_file:
+            with open(config_file, "r") as f:
+                self.config = yaml.safe_load(f)
 
         self.PUBLIC_GRAINS: list[str] = self.config.get(
             "netunicorn.connector.salt.public_grains", ["location", "osarch", "kernel"]
@@ -55,7 +57,7 @@ class SaltConnector(NetunicornConnectorProtocol):
     async def initialize(self) -> None:
         return
 
-    async def health(self) -> (bool, str):
+    async def health(self) -> Tuple[bool, str]:
         return True, "OK"
 
     async def shutdown(self) -> None:
@@ -103,9 +105,9 @@ class SaltConnector(NetunicornConnectorProtocol):
                 f"Error: {e}\n"
                 f"Deployments: {deployments_list}"
             )
-            return {x.executor_id: Failure(e) for x in deployments_list}
+            return {x.executor_id: Failure(str(e)) for x in deployments_list}
 
-        results = {}
+        results: dict[str, Result[None, str]] = {}
         for deployment in deployments_list:
             if salt_return.get(deployment.node.name, {}).get("retcode", 1) != 0:
                 results[deployment.executor_id] = Failure(
@@ -124,7 +126,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         return results
 
     @staticmethod
-    def __all_salt_results_are_correct(results: list, node_name: str) -> bool:
+    def __all_salt_results_are_correct(results: list[dict[str, dict[str, int | str]]], node_name: str) -> bool:
         return (
             # results are not empty
             bool(results)
@@ -283,7 +285,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         result = ""
         try:
             self.logger.debug(f"Command: {runcommand}")
-            result: str = self.local.cmd_async(
+            result = self.local.cmd_async(
                 deployment.node.name,
                 "cmd.run",
                 arg=[(runcommand,)],
@@ -321,8 +323,8 @@ class SaltConnector(NetunicornConnectorProtocol):
                     break
                 data = data.get("Result", {})
                 if data:
-                    result = data.get(deployment.node.name, {}).get("retcode", 1)
-                    if result == 1:
+                    return_code = data.get(deployment.node.name, {}).get("retcode", 1)
+                    if return_code == 1:
                         error = data.get(deployment.node.name, {}).get(
                             "return", "Unknown error"
                         )
@@ -346,18 +348,15 @@ class SaltConnector(NetunicornConnectorProtocol):
 
         keys = [deployment.executor_id for deployment in deployments]
         # Start all deployments
-        # noinspection PyTypeChecker
-        answers: tuple[Exception | Result[None, str]] = await asyncio.gather(
-            *[
-                self._start_single_execution(experiment_id, deployment)
-                for deployment in deployments
-            ]
+        answers: tuple[Exception | Result[None, str]] = await asyncio.gather(  # type: ignore
+            self._start_single_execution(experiment_id, deployment)
+            for deployment in deployments
         )
 
         results: dict[str, Result[None, str]] = {}
         for key, answer in zip(keys, answers):
             if isinstance(answer, Exception):
-                answer = Failure(answer)
+                answer = Failure(str(answer))
             results[key] = answer
 
         return results
@@ -378,6 +377,6 @@ class SaltConnector(NetunicornConnectorProtocol):
                 )
         except Exception as e:
             self.logger.error(f"Error stopping executors: {e}")
-            return {request["node_name"]: Failure(e) for request in requests_list}
+            return {request["node_name"]: Failure(str(e)) for request in requests_list}
 
         return {request["node_name"]: Success(None) for request in requests_list}
