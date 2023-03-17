@@ -64,7 +64,7 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         return
 
     async def get_nodes(self, username: str) -> CountableNodePool:
-        self.local.cmd('*', 'saltutil.sync_grains')
+        self.local.cmd("*", "saltutil.sync_grains")
         nodes = self.local.cmd("*", "grains.item", arg=self.PUBLIC_GRAINS)
         node_pool = []
         for node_name, node_grains in nodes.items():
@@ -127,7 +127,9 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         return results
 
     @staticmethod
-    def __all_salt_results_are_correct(results: list[dict[str, dict[str, int | str]]], node_name: str) -> bool:
+    def __all_salt_results_are_correct(
+        results: list[dict[str, dict[str, int | str]]], node_name: str
+    ) -> bool:
         return (
             # results are not empty
             bool(results)
@@ -350,8 +352,10 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         keys = [deployment.executor_id for deployment in deployments]
         # Start all deployments
         answers: tuple[Exception | Result[None, str]] = await asyncio.gather(  # type: ignore
-            *(self._start_single_execution(experiment_id, deployment)
-            for deployment in deployments)
+            *(
+                self._start_single_execution(experiment_id, deployment)
+                for deployment in deployments
+            )
         )
 
         results: dict[str, Result[None, str]] = {}
