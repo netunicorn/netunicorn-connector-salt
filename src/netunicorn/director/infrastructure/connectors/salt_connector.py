@@ -64,6 +64,7 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         return
 
     async def get_nodes(self, username: str) -> CountableNodePool:
+        self.local.cmd('*', 'saltutil.sync_grains')
         nodes = self.local.cmd("*", "grains.item", arg=self.PUBLIC_GRAINS)
         node_pool = []
         for node_name, node_grains in nodes.items():
