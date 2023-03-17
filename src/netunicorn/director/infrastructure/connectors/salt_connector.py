@@ -350,8 +350,8 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         keys = [deployment.executor_id for deployment in deployments]
         # Start all deployments
         answers: tuple[Exception | Result[None, str]] = await asyncio.gather(  # type: ignore
-            self._start_single_execution(experiment_id, deployment)
-            for deployment in deployments
+            *(self._start_single_execution(experiment_id, deployment)
+            for deployment in deployments)
         )
 
         results: dict[str, Result[None, str]] = {}
