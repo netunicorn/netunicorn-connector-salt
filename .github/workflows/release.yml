@@ -22,7 +22,9 @@ jobs:
       - uses: actions/checkout@v3
       - name: Check if local version newer than PyPI version
         id: check-pypi-version
-        uses: maybe-hello-world/pyproject-check-version@v2
+        uses: maybe-hello-world/pyproject-check-version@v3
+        with:
+          pyproject-path: "./pyproject.toml"
 
   deploy:
     runs-on: ubuntu-latest
