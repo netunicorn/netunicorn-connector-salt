@@ -63,7 +63,7 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
     async def shutdown(self) -> None:
         return
 
-    async def get_nodes(self, username: str) -> CountableNodePool:
+    async def get_nodes(self, username: str, *args, **kwargs) -> CountableNodePool:
         self.local.cmd("*", "saltutil.sync_grains")
         nodes = self.local.cmd("*", "grains.item", arg=self.PUBLIC_GRAINS)
         node_pool = []
@@ -188,7 +188,12 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         pass
 
     async def deploy(
-        self, username: str, experiment_id: str, deployments: list[Deployment]
+        self,
+        username: str,
+        experiment_id: str,
+        deployments: list[Deployment],
+        *args,
+        **kwargs,
     ) -> dict[str, Result[None, str]]:
         docker_deployments = []
         shell_deployments = []
@@ -346,7 +351,12 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         return Success(None)
 
     async def execute(
-        self, username: str, experiment_id: str, deployments: list[Deployment]
+        self,
+        username: str,
+        experiment_id: str,
+        deployments: list[Deployment],
+        *args,
+        **kwargs,
     ) -> dict[str, Result[None, str]]:
 
         keys = [deployment.executor_id for deployment in deployments]
@@ -367,7 +377,7 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         return results
 
     async def stop_executors(
-        self, username: str, requests_list: list[StopExecutorRequest]
+        self, username: str, requests_list: list[StopExecutorRequest], *args, **kwargs
     ) -> dict[str, Result[None, str]]:
 
         try:
