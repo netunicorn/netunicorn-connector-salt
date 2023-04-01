@@ -134,9 +134,11 @@ class SaltConnector(NetunicornConnectorProtocol):
                     "username": self.username,
                     "password": self.password,
                     "eauth": self.eauth,
+                    "full_return": True,
                 },
             ) as response:
                 salt_return = await response.json()
+                self.logger.debug(salt_return)
                 salt_return = salt_return.get("return", [{}])[0]
 
             assert isinstance(salt_return, dict)
@@ -210,6 +212,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                             "username": self.username,
                             "password": self.password,
                             "eauth": self.eauth,
+                            "full_return": True,
                         },
                     )
                 )
