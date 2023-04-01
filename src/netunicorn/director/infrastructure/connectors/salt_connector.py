@@ -97,7 +97,8 @@ class SaltConnector(NetunicornConnectorProtocol):
                 nodes = nodes.get("return", [{}])[0]
         except Exception as e:
             self.logger.error(f"Exception during get_nodes: {e}")
-            self.logger.debug(await response.text())
+            if 'response' in locals():
+                self.logger.debug(await response.text())
             return CountableNodePool([])
 
         node_pool = []
@@ -129,8 +130,9 @@ class SaltConnector(NetunicornConnectorProtocol):
                 json={
                     "client": "local",
                     "tgt": [x.node.name for x in deployments_list],
+                    "tgt_type": "list",
                     "fun": "cmd.run",
-                    "arg": [(f"docker pull {image}",)],
+                    "arg": [f"docker pull {image}"],
                     "username": self.username,
                     "password": self.password,
                     "eauth": self.eauth,
@@ -208,7 +210,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                             "client": "local",
                             "tgt": deployment.node.name,
                             "fun": "cmd.run",
-                            "arg": [(command,)],
+                            "arg": [command],
                             "username": self.username,
                             "password": self.password,
                             "eauth": self.eauth,
@@ -354,7 +356,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                     "client": "local",
                     "tgt": deployment.node.name,
                     "fun": "cmd.run",
-                    "arg": [(runcommand,)],
+                    "arg": [runcommand],
                     "username": self.username,
                     "password": self.password,
                     "eauth": self.eauth,
@@ -468,7 +470,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                             "client": "local",
                             "tgt": request["node_name"],
                             "fun": "cmd.run",
-                            "arg": [(f"docker stop {request['executor_id']}",)],
+                            "arg": [f"docker stop {request['executor_id']}"],
                             "username": self.username,
                             "password": self.password,
                             "eauth": self.eauth,
@@ -483,6 +485,12 @@ class SaltConnector(NetunicornConnectorProtocol):
 
 
 async def debug():
+    from netunicorn.base import Pipeline, Experiment, Task
+
+    class DummyTask(Task):
+        def run(self):
+            return 0
+
     connector = SaltConnector(
         "debug", "configuration-example.yaml", "https://example.com"
     )
@@ -490,6 +498,11 @@ async def debug():
     await connector.health()
     nodes = await connector.get_nodes("debug")
     print(nodes)
+    nodes = nodes.take(3)
+    pipeline = Pipeline([DummyTask()])
+    pipeline.environment_definition.image = "ubuntu:latest"
+    experiment = Experiment().map(pipeline, nodes)
+    await connector.deploy('debug', 'debug', experiment.deployment_map)
     await connector.shutdown()
 
 
