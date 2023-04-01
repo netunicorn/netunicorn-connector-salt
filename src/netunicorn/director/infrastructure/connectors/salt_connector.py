@@ -65,14 +65,14 @@ class SaltConnector(NetunicornConnectorProtocol):
 
     async def get_nodes(self, username: str, *args, **kwargs) -> CountableNodePool:
         try:
-            await self.session.post(self.runpoint, json={
+            (await self.session.post(self.runpoint, json={
                 "client": "local",
                 "tgt": "*",
                 "fun": "saltutil.sync_grains",
                 "username": self.username,
                 "password": self.password,
                 "eauth": self.eauth,
-            })
+            })).raise_for_status()
 
             async with self.session.post(self.runpoint, json={
                 "client": "local",
@@ -427,7 +427,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 self.logger.debug(
                     f"Stopping executor {request['executor_id']} on node {request['node_name']}"
                 )
-                await self.session.post(self.runpoint, json={
+                (await self.session.post(self.runpoint, json={
                     "client": "local",
                     "tgt": request["node_name"],
                     "fun": "cmd.run",
@@ -435,7 +435,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                     "username": self.username,
                     "password": self.password,
                     "eauth": self.eauth,
-                })
+                })).raise_for_status()
         except Exception as e:
             self.logger.error(f"Error stopping executors: {e}")
             return {request["node_name"]: Failure(str(e)) for request in requests_list}
