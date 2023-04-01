@@ -143,7 +143,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 self.logger.debug(salt_return)
                 salt_return = salt_return.get("return", [{}])[0]
 
-            assert isinstance(salt_return, dict)
+            assert isinstance(salt_return, dict) and len(salt_return) > 0
         except Exception as e:
             self.logger.error(
                 f"Exception during deployment.\n"
@@ -364,10 +364,11 @@ class SaltConnector(NetunicornConnectorProtocol):
             ) as response:
                 result = await response.json()
                 result = result.get("return", [{}])[0]
-            if isinstance(result, int):
+            if not result:
                 raise Exception(
-                    f"Salt returned unknown error - most likely a node is not available: {result}"
+                    f"CherryPy returned an empty response - usually that means that node is not available: {result}"
                 )
+            result = result['jid']
         except Exception as e:
             self.logger.error(
                 f"Exception during deployment.\n"
