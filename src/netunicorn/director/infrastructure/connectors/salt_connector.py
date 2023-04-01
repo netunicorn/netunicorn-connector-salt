@@ -45,8 +45,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         self.username = self.config.get("netunicorn.connector.salt.username")
         self.password = self.config.get("netunicorn.connector.salt.password")
         self.eauth = self.config.get("netunicorn.connector.salt.eauth")
-
-        self.session = aiohttp.ClientSession()
+        self.session = None
 
         if not logger:
             logging.basicConfig()
@@ -54,6 +53,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         self.logger = logger
 
     async def initialize(self) -> None:
+        self.session = aiohttp.ClientSession(headers={"Accept": "application/json"})
         return
 
     async def health(self) -> Tuple[bool, str]:
@@ -84,6 +84,8 @@ class SaltConnector(NetunicornConnectorProtocol):
                 "eauth": self.eauth,
             }) as response:
                 nodes = await response.json()
+                nodes = nodes.get("return", [{}])[0]
+                self.logger.debug(f"Nodes: {nodes}")
         except Exception as e:
             self.logger.error(f"Exception during get_nodes: {e}")
             self.logger.debug(await response.text())
@@ -123,6 +125,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 "eauth": self.eauth,
             }) as response:
                 salt_return = await response.json()
+                salt_return = salt_return.get("return", [{}])[0]
 
             assert isinstance(salt_return, dict)
         except Exception as e:
@@ -182,6 +185,7 @@ class SaltConnector(NetunicornConnectorProtocol):
             return {deployment.executor_id: Success(None)}
 
         try:
+            # consequent, not in parallel
             results = [
                 await (await self.session.post(self.runpoint, json={
                     "client": "local",
@@ -191,7 +195,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                     "username": self.username,
                     "password": self.password,
                     "eauth": self.eauth,
-                })).json()
+                })).json().get("return", [{}])[0]
                 for command in deployment.environment_definition.commands
             ]
         except Exception as e:
@@ -332,6 +336,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 "eauth": self.eauth,
             }) as response:
                 result = await response.json()
+                result = result.get("return", [{}])[0]
             if isinstance(result, int):
                 raise Exception(
                     f"Salt returned unknown error - most likely a node is not available: {result}"
@@ -362,6 +367,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                         "eauth": self.eauth,
                     }) as response:
                         data = await response.json()
+                        data = data.get("return", [{}])[0]
                 except Exception as e:
                     self.logger.error(f"Exception during job list: {e}")
                     self.logger.debug(await response.text())
@@ -441,3 +447,16 @@ class SaltConnector(NetunicornConnectorProtocol):
             return {request["node_name"]: Failure(str(e)) for request in requests_list}
 
         return {request["node_name"]: Success(None) for request in requests_list}
+
+
+async def debug():
+    connector = SaltConnector("debug", "configuration-example.yaml", "https://example.com")
+    await connector.initialize()
+    await connector.health()
+    nodes = await connector.get_nodes('debug')
+    print(nodes)
+    await connector.shutdown()
+
+# debug
+if __name__ == '__main__':
+    asyncio.run(debug())
