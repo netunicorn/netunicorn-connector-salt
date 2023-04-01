@@ -5,8 +5,7 @@ import logging
 from collections import defaultdict
 from typing import Optional, Tuple
 
-import salt.config
-import salt.runner
+import aiohttp
 import yaml
 from netunicorn.base.architecture import Architecture
 from netunicorn.base.deployment import Deployment
@@ -20,7 +19,7 @@ from netunicorn.director.infrastructure.connectors.protocol import (
 from netunicorn.director.infrastructure.connectors.types import StopExecutorRequest
 
 
-class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
+class SaltConnector(NetunicornConnectorProtocol):
     def __init__(
         self,
         connector_name: str,
@@ -40,32 +39,68 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         self.PUBLIC_GRAINS: list[str] = self.config.get(
             "netunicorn.connector.salt.public_grains", ["location", "osarch", "kernel"]
         )
-        master_opts = self.config.get(
-            "netunicorn.connector.salt.master_opts", "/etc/salt/master"
-        )
-        self.master_opts = salt.config.client_config(master_opts)
 
-        # noinspection PyUnresolvedReferences
-        self.local = salt.client.LocalClient()
-        self.runner = salt.runner.RunnerClient(self.master_opts)
+        self.endpoint = self.config.get(
+            "netunicorn.connector.salt.endpoint"
+        ).removesuffix("/")
+        self.runpoint = self.endpoint + "/run"
+        self.username = self.config.get("netunicorn.connector.salt.username")
+        self.password = self.config.get("netunicorn.connector.salt.password")
+        self.eauth = self.config.get("netunicorn.connector.salt.eauth")
+        self.session = None
 
         if not logger:
-            logging.basicConfig()
+            logging.basicConfig(level=logging.DEBUG)
             logger = logging.getLogger(__name__)
         self.logger = logger
 
     async def initialize(self) -> None:
+        self.session = aiohttp.ClientSession(headers={"Accept": "application/json"})
         return
 
     async def health(self) -> Tuple[bool, str]:
         return True, "OK"
 
     async def shutdown(self) -> None:
+        await self.session.close()
         return
 
     async def get_nodes(self, username: str, *args, **kwargs) -> CountableNodePool:
-        self.local.cmd("*", "saltutil.sync_grains")
-        nodes = self.local.cmd("*", "grains.item", arg=self.PUBLIC_GRAINS)
+        try:
+            (
+                await self.session.post(
+                    self.runpoint,
+                    json={
+                        "client": "local",
+                        "tgt": "*",
+                        "fun": "saltutil.sync_grains",
+                        "username": self.username,
+                        "password": self.password,
+                        "eauth": self.eauth,
+                    },
+                )
+            ).raise_for_status()
+
+            async with self.session.post(
+                self.runpoint,
+                json={
+                    "client": "local",
+                    "tgt": "*",
+                    "fun": "grains.item",
+                    "arg": self.PUBLIC_GRAINS,
+                    "username": self.username,
+                    "password": self.password,
+                    "eauth": self.eauth,
+                },
+            ) as response:
+                nodes = await response.json()
+                nodes = nodes.get("return", [{}])[0]
+        except Exception as e:
+            self.logger.error(f"Exception during get_nodes: {e}")
+            if 'response' in locals():
+                self.logger.debug(await response.text())
+            return CountableNodePool([])
+
         node_pool = []
         for node_name, node_grains in nodes.items():
             if not node_grains:
@@ -90,15 +125,25 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         self, experiment_id: str, deployments_list: list[Deployment], image: str
     ) -> dict[str, Result[None, str]]:
         try:
-            salt_return = self.local.cmd(
-                [x.node.name for x in deployments_list],
-                "cmd.run",
-                arg=[(f"docker pull {image}",)],
-                timeout=600,
-                full_return=True,
-                tgt_type="list",
-            )
-            assert isinstance(salt_return, dict)
+            async with self.session.post(
+                self.runpoint,
+                json={
+                    "client": "local",
+                    "tgt": [x.node.name for x in deployments_list],
+                    "tgt_type": "list",
+                    "fun": "cmd.run",
+                    "arg": [f"docker pull {image}"],
+                    "username": self.username,
+                    "password": self.password,
+                    "eauth": self.eauth,
+                    "full_return": True,
+                },
+            ) as response:
+                salt_return = await response.json()
+                self.logger.debug(salt_return)
+                salt_return = salt_return.get("return", [{}])[0]
+
+            assert isinstance(salt_return, dict) and len(salt_return) > 0
         except Exception as e:
             self.logger.error(
                 f"Exception during deployment.\n"
@@ -106,6 +151,7 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
                 f"Error: {e}\n"
                 f"Deployments: {deployments_list}"
             )
+            self.logger.debug(await response.text())
             return {x.executor_id: Failure(str(e)) for x in deployments_list}
 
         results: dict[str, Result[None, str]] = {}
@@ -155,14 +201,25 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
             return {deployment.executor_id: Success(None)}
 
         try:
+            # consequent, not in parallel
             results = [
-                self.local.cmd(
-                    deployment.node.name,
-                    "cmd.run",
-                    arg=[(command,)],
-                    timeout=300,
-                    full_return=True,
+                await (
+                    await self.session.post(
+                        self.runpoint,
+                        json={
+                            "client": "local",
+                            "tgt": deployment.node.name,
+                            "fun": "cmd.run",
+                            "arg": [command],
+                            "username": self.username,
+                            "password": self.password,
+                            "eauth": self.eauth,
+                            "full_return": True,
+                        },
+                    )
                 )
+                .json()
+                .get("return", [{}])[0]
                 for command in deployment.environment_definition.commands
             ]
         except Exception as e:
@@ -270,6 +327,9 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
             f"Starting execution with executor {deployment.executor_id}, node {deployment.node}"
         )
 
+        if deployment.executor_id is None:
+            return Failure("Executor id is None")
+
         deployment.environment_definition.runtime_context.environment_variables[
             "NETUNICORN_EXECUTOR_ID"
         ] = deployment.executor_id
@@ -293,16 +353,25 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         result = ""
         try:
             self.logger.debug(f"Command: {runcommand}")
-            result = self.local.cmd_async(
-                deployment.node.name,
-                "cmd.run",
-                arg=[(runcommand,)],
-                timeout=5,
-            )
-            if isinstance(result, int):
+            async with self.session.post(
+                self.runpoint,
+                json={
+                    "client": "local_async",
+                    "tgt": deployment.node.name,
+                    "fun": "cmd.run",
+                    "arg": [runcommand],
+                    "username": self.username,
+                    "password": self.password,
+                    "eauth": self.eauth,
+                },
+            ) as response:
+                result = await response.json()
+                result = result.get("return", [{}])[0]
+            if not result:
                 raise Exception(
-                    f"Salt returned unknown error - most likely node is not available"
+                    f"CherryPy returned an empty response - usually that means that node is not available: {result}"
                 )
+            result = result['jid']
         except Exception as e:
             self.logger.error(
                 f"Exception during deployment.\n"
@@ -310,6 +379,7 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
                 f"Error: {e}\n"
                 f"Deployment: {deployment}"
             )
+            self.logger.debug(await response.text())
             error = str(e)
 
         # don't need to wait shell executions to finish
@@ -318,11 +388,22 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         ):
             for _ in range(10):
                 try:
-                    data = self.runner.cmd(
-                        "jobs.list_job", arg=[result], print_event=False
-                    )
+                    async with self.session.post(
+                        self.runpoint,
+                        json={
+                            "client": "runner",
+                            "fun": "jobs.list_job",
+                            "arg": [result],
+                            "username": self.username,
+                            "password": self.password,
+                            "eauth": self.eauth,
+                        },
+                    ) as response:
+                        data = await response.json()
+                        data = data.get("return", [{}])[0]
                 except Exception as e:
                     self.logger.error(f"Exception during job list: {e}")
+                    self.logger.debug(await response.text())
                     error = str(e)
                     break
                 if not isinstance(data, dict) or "Error" in data:
@@ -332,7 +413,7 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
                 data = data.get("Result", {})
                 if data:
                     return_code = data.get(deployment.node.name, {}).get("retcode", 1)
-                    if return_code == 1:
+                    if return_code != 0:
                         error = data.get(deployment.node.name, {}).get(
                             "return", "Unknown error"
                         )
@@ -385,13 +466,52 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
                 self.logger.debug(
                     f"Stopping executor {request['executor_id']} on node {request['node_name']}"
                 )
-                self.local.cmd_async(
-                    request["node_name"],
-                    "cmd.run",
-                    [(f"docker stop {request['executor_id']}",)],
-                )
+                (
+                    await self.session.post(
+                        self.runpoint,
+                        json={
+                            "client": "local_async",
+                            "tgt": request["node_name"],
+                            "fun": "cmd.run",
+                            "arg": [f"docker stop {request['executor_id']}"],
+                            "username": self.username,
+                            "password": self.password,
+                            "eauth": self.eauth,
+                        },
+                    )
+                ).raise_for_status()
         except Exception as e:
             self.logger.error(f"Error stopping executors: {e}")
             return {request["node_name"]: Failure(str(e)) for request in requests_list}
 
         return {request["node_name"]: Success(None) for request in requests_list}
+
+
+async def debug():
+    from netunicorn.base import Pipeline, Experiment, Task
+
+    class DummyTask(Task):
+        def run(self):
+            return 0
+
+    connector = SaltConnector(
+        "debug", "configuration-example.yaml", "https://example.com"
+    )
+    await connector.initialize()
+    await connector.health()
+    nodes = await connector.get_nodes("debug")
+    print(nodes)
+    nodes = nodes.take(1)
+    pipeline = Pipeline([DummyTask()])
+    pipeline.environment_definition.image = "ubuntu:latest"
+    experiment = Experiment().map(pipeline, nodes)
+    for deployment in experiment.deployment_map:
+        deployment.executor_id = "debug"
+    await connector.deploy('debug', 'debug', experiment.deployment_map)
+    await connector.execute('debug', 'debug', experiment.deployment_map)
+    await connector.shutdown()
+
+
+# debug
+if __name__ == "__main__":
+    asyncio.run(debug())
