@@ -124,7 +124,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         self, experiment_id: str, deployments_list: list[Deployment], image: str
     ) -> dict[str, Result[None, str]]:
         try:
-            with self.session.post(
+            async with self.session.post(
                 self.runpoint,
                 json={
                     "client": "local",
@@ -345,7 +345,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         result = ""
         try:
             self.logger.debug(f"Command: {runcommand}")
-            with self.session.post(
+            async with self.session.post(
                 self.runpoint,
                 json={
                     "client": "local",
@@ -379,7 +379,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         ):
             for _ in range(10):
                 try:
-                    with self.session.post(
+                    async with self.session.post(
                         self.runpoint,
                         json={
                             "client": "local",
