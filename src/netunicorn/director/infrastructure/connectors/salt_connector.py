@@ -353,7 +353,7 @@ class SaltConnector(NetunicornConnectorProtocol):
             async with self.session.post(
                 self.runpoint,
                 json={
-                    "client": "local",
+                    "client": "local_async",
                     "tgt": deployment.node.name,
                     "fun": "cmd.run",
                     "arg": [runcommand],
@@ -467,7 +467,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                     await self.session.post(
                         self.runpoint,
                         json={
-                            "client": "local",
+                            "client": "local_async",
                             "tgt": request["node_name"],
                             "fun": "cmd.run",
                             "arg": [f"docker stop {request['executor_id']}"],
