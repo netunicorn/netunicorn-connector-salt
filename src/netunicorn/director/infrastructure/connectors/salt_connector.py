@@ -86,6 +86,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 nodes = await response.json()
         except Exception as e:
             self.logger.error(f"Exception during get_nodes: {e}")
+            self.logger.debug(await response.text())
             return CountableNodePool([])
 
         node_pool = []
@@ -131,6 +132,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 f"Error: {e}\n"
                 f"Deployments: {deployments_list}"
             )
+            self.logger.debug(await response.text())
             return {x.executor_id: Failure(str(e)) for x in deployments_list}
 
         results: dict[str, Result[None, str]] = {}
@@ -341,6 +343,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 f"Error: {e}\n"
                 f"Deployment: {deployment}"
             )
+            self.logger.debug(await response.text())
             error = str(e)
 
         # don't need to wait shell executions to finish
@@ -361,6 +364,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                         data = await response.json()
                 except Exception as e:
                     self.logger.error(f"Exception during job list: {e}")
+                    self.logger.debug(await response.text())
                     error = str(e)
                     break
                 if not isinstance(data, dict) or "Error" in data:
