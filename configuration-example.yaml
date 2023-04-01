@@ -4,7 +4,10 @@ netunicorn.connector.salt.public_grains:
   - osarch
   - kernel
 
-netunicorn.connector.salt.master_opts: "/etc/salt/master"
+netunicorn.connector.salt.endpoint: "https://infra.example.com/saltapi"
+netunicorn.connector.salt.login: "username"
+netunicorn.connector.salt.password: "password"
+netunicorn.connector.salt.eauth: "pam"
 
 
 

@@ -5,8 +5,7 @@ import logging
 from collections import defaultdict
 from typing import Optional, Tuple
 
-import salt.config
-import salt.runner
+import aiohttp
 import yaml
 from netunicorn.base.architecture import Architecture
 from netunicorn.base.deployment import Deployment
@@ -20,7 +19,7 @@ from netunicorn.director.infrastructure.connectors.protocol import (
 from netunicorn.director.infrastructure.connectors.types import StopExecutorRequest
 
 
-class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
+class SaltConnector(NetunicornConnectorProtocol):
     def __init__(
         self,
         connector_name: str,
@@ -40,14 +39,13 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         self.PUBLIC_GRAINS: list[str] = self.config.get(
             "netunicorn.connector.salt.public_grains", ["location", "osarch", "kernel"]
         )
-        master_opts = self.config.get(
-            "netunicorn.connector.salt.master_opts", "/etc/salt/master"
-        )
-        self.master_opts = salt.config.client_config(master_opts)
 
-        # noinspection PyUnresolvedReferences
-        self.local = salt.client.LocalClient()
-        self.runner = salt.runner.RunnerClient(self.master_opts)
+        self.endpoint = self.config.get("netunicorn.connector.salt.endpoint").removesuffix("/")
+        self.username = self.config.get("netunicorn.connector.salt.username")
+        self.password = self.config.get("netunicorn.connector.salt.password")
+        self.eauth = self.config.get("netunicorn.connector.salt.eauth")
+
+        self.session = aiohttp.ClientSession(self.endpoint)
 
         if not logger:
             logging.basicConfig()
@@ -61,11 +59,34 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         return True, "OK"
 
     async def shutdown(self) -> None:
+        await self.session.close()
         return
 
     async def get_nodes(self, username: str, *args, **kwargs) -> CountableNodePool:
-        self.local.cmd("*", "saltutil.sync_grains")
-        nodes = self.local.cmd("*", "grains.item", arg=self.PUBLIC_GRAINS)
+        try:
+            await self.session.post('/run', json={
+                "client": "local",
+                "tgt": "*",
+                "fun": "saltutil.sync_grains",
+                "username": self.username,
+                "password": self.password,
+                "eauth": self.eauth,
+            })
+
+            async with self.session.post('/run', json={
+                "client": "local",
+                "tgt": "*",
+                "fun": "grains.item",
+                "arg": self.PUBLIC_GRAINS,
+                "username": self.username,
+                "password": self.password,
+                "eauth": self.eauth,
+            }) as response:
+                nodes = await response.json()
+        except Exception as e:
+            self.logger.error(f"Exception during get_nodes: {e}")
+            return CountableNodePool([])
+
         node_pool = []
         for node_name, node_grains in nodes.items():
             if not node_grains:
@@ -90,14 +111,17 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         self, experiment_id: str, deployments_list: list[Deployment], image: str
     ) -> dict[str, Result[None, str]]:
         try:
-            salt_return = self.local.cmd(
-                [x.node.name for x in deployments_list],
-                "cmd.run",
-                arg=[(f"docker pull {image}",)],
-                timeout=600,
-                full_return=True,
-                tgt_type="list",
-            )
+            with self.session.post('/run', json={
+                "client": "local",
+                "tgt": [x.node.name for x in deployments_list],
+                "fun": "cmd.run",
+                "arg": [(f"docker pull {image}",)],
+                "username": self.username,
+                "password": self.password,
+                "eauth": self.eauth,
+            }) as response:
+                salt_return = await response.json()
+
             assert isinstance(salt_return, dict)
         except Exception as e:
             self.logger.error(
@@ -156,13 +180,15 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
 
         try:
             results = [
-                self.local.cmd(
-                    deployment.node.name,
-                    "cmd.run",
-                    arg=[(command,)],
-                    timeout=300,
-                    full_return=True,
-                )
+                await (await self.session.post('/run', json={
+                    "client": "local",
+                    "tgt": deployment.node.name,
+                    "fun": "cmd.run",
+                    "arg": [(command,)],
+                    "username": self.username,
+                    "password": self.password,
+                    "eauth": self.eauth,
+                })).json()
                 for command in deployment.environment_definition.commands
             ]
         except Exception as e:
@@ -293,15 +319,19 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         result = ""
         try:
             self.logger.debug(f"Command: {runcommand}")
-            result = self.local.cmd_async(
-                deployment.node.name,
-                "cmd.run",
-                arg=[(runcommand,)],
-                timeout=5,
-            )
+            with self.session.post('/run', json={
+                "client": "local",
+                "tgt": deployment.node.name,
+                "fun": "cmd.run",
+                "arg": [(runcommand,)],
+                "username": self.username,
+                "password": self.password,
+                "eauth": self.eauth,
+            }) as response:
+                result = await response.json()
             if isinstance(result, int):
                 raise Exception(
-                    f"Salt returned unknown error - most likely node is not available"
+                    f"Salt returned unknown error - most likely a node is not available: {result}"
                 )
         except Exception as e:
             self.logger.error(
@@ -318,9 +348,16 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
         ):
             for _ in range(10):
                 try:
-                    data = self.runner.cmd(
-                        "jobs.list_job", arg=[result], print_event=False
-                    )
+                    with self.session.post('/run', json={
+                        "client": "local",
+                        "tgt": deployment.node.name,
+                        "fun": "jobs.list_job",
+                        "arg": [result],
+                        "username": self.username,
+                        "password": self.password,
+                        "eauth": self.eauth,
+                    }) as response:
+                        data = await response.json()
                 except Exception as e:
                     self.logger.error(f"Exception during job list: {e}")
                     error = str(e)
@@ -385,11 +422,15 @@ class SaltConnector(NetunicornConnectorProtocol):  # type: ignore
                 self.logger.debug(
                     f"Stopping executor {request['executor_id']} on node {request['node_name']}"
                 )
-                self.local.cmd_async(
-                    request["node_name"],
-                    "cmd.run",
-                    [(f"docker stop {request['executor_id']}",)],
-                )
+                await self.session.post('/run', json={
+                    "client": "local",
+                    "tgt": request["node_name"],
+                    "fun": "cmd.run",
+                    "arg": [(f"docker stop {request['executor_id']}",)],
+                    "username": self.username,
+                    "password": self.password,
+                    "eauth": self.eauth,
+                })
         except Exception as e:
             self.logger.error(f"Error stopping executors: {e}")
             return {request["node_name"]: Failure(str(e)) for request in requests_list}
