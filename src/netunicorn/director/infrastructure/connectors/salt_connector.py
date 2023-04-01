@@ -41,11 +41,12 @@ class SaltConnector(NetunicornConnectorProtocol):
         )
 
         self.endpoint = self.config.get("netunicorn.connector.salt.endpoint").removesuffix("/")
+        self.runpoint = self.endpoint + "/run"
         self.username = self.config.get("netunicorn.connector.salt.username")
         self.password = self.config.get("netunicorn.connector.salt.password")
         self.eauth = self.config.get("netunicorn.connector.salt.eauth")
 
-        self.session = aiohttp.ClientSession(self.endpoint)
+        self.session = aiohttp.ClientSession()
 
         if not logger:
             logging.basicConfig()
@@ -64,7 +65,7 @@ class SaltConnector(NetunicornConnectorProtocol):
 
     async def get_nodes(self, username: str, *args, **kwargs) -> CountableNodePool:
         try:
-            await self.session.post('/run', json={
+            await self.session.post(self.runpoint, json={
                 "client": "local",
                 "tgt": "*",
                 "fun": "saltutil.sync_grains",
@@ -73,7 +74,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 "eauth": self.eauth,
             })
 
-            async with self.session.post('/run', json={
+            async with self.session.post(self.runpoint, json={
                 "client": "local",
                 "tgt": "*",
                 "fun": "grains.item",
@@ -111,7 +112,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         self, experiment_id: str, deployments_list: list[Deployment], image: str
     ) -> dict[str, Result[None, str]]:
         try:
-            with self.session.post('/run', json={
+            with self.session.post(self.runpoint, json={
                 "client": "local",
                 "tgt": [x.node.name for x in deployments_list],
                 "fun": "cmd.run",
@@ -180,7 +181,7 @@ class SaltConnector(NetunicornConnectorProtocol):
 
         try:
             results = [
-                await (await self.session.post('/run', json={
+                await (await self.session.post(self.runpoint, json={
                     "client": "local",
                     "tgt": deployment.node.name,
                     "fun": "cmd.run",
@@ -319,7 +320,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         result = ""
         try:
             self.logger.debug(f"Command: {runcommand}")
-            with self.session.post('/run', json={
+            with self.session.post(self.runpoint, json={
                 "client": "local",
                 "tgt": deployment.node.name,
                 "fun": "cmd.run",
@@ -348,7 +349,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         ):
             for _ in range(10):
                 try:
-                    with self.session.post('/run', json={
+                    with self.session.post(self.runpoint, json={
                         "client": "local",
                         "tgt": deployment.node.name,
                         "fun": "jobs.list_job",
@@ -422,7 +423,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 self.logger.debug(
                     f"Stopping executor {request['executor_id']} on node {request['node_name']}"
                 )
-                await self.session.post('/run', json={
+                await self.session.post(self.runpoint, json={
                     "client": "local",
                     "tgt": request["node_name"],
                     "fun": "cmd.run",
