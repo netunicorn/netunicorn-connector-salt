@@ -95,7 +95,6 @@ class SaltConnector(NetunicornConnectorProtocol):
             ) as response:
                 nodes = await response.json()
                 nodes = nodes.get("return", [{}])[0]
-                self.logger.debug(f"Nodes: {nodes}")
         except Exception as e:
             self.logger.error(f"Exception during get_nodes: {e}")
             self.logger.debug(await response.text())
