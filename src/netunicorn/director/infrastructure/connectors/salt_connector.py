@@ -50,7 +50,7 @@ class SaltConnector(NetunicornConnectorProtocol):
         self.session = None
 
         if not logger:
-            logging.basicConfig()
+            logging.basicConfig(level=logging.DEBUG)
             logger = logging.getLogger(__name__)
         self.logger = logger
 
@@ -327,6 +327,9 @@ class SaltConnector(NetunicornConnectorProtocol):
             f"Starting execution with executor {deployment.executor_id}, node {deployment.node}"
         )
 
+        if deployment.executor_id is None:
+            return Failure("Executor id is None")
+
         deployment.environment_definition.runtime_context.environment_variables[
             "NETUNICORN_EXECUTOR_ID"
         ] = deployment.executor_id
@@ -388,8 +391,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                     async with self.session.post(
                         self.runpoint,
                         json={
-                            "client": "local",
-                            "tgt": deployment.node.name,
+                            "client": "runner",
                             "fun": "jobs.list_job",
                             "arg": [result],
                             "username": self.username,
@@ -411,7 +413,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 data = data.get("Result", {})
                 if data:
                     return_code = data.get(deployment.node.name, {}).get("retcode", 1)
-                    if return_code == 1:
+                    if return_code != 0:
                         error = data.get(deployment.node.name, {}).get(
                             "return", "Unknown error"
                         )
@@ -499,11 +501,14 @@ async def debug():
     await connector.health()
     nodes = await connector.get_nodes("debug")
     print(nodes)
-    nodes = nodes.take(3)
+    nodes = nodes.take(1)
     pipeline = Pipeline([DummyTask()])
     pipeline.environment_definition.image = "ubuntu:latest"
     experiment = Experiment().map(pipeline, nodes)
+    for deployment in experiment.deployment_map:
+        deployment.executor_id = "debug"
     await connector.deploy('debug', 'debug', experiment.deployment_map)
+    await connector.execute('debug', 'debug', experiment.deployment_map)
     await connector.shutdown()
 
 
