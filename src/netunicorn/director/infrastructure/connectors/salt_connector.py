@@ -202,25 +202,25 @@ class SaltConnector(NetunicornConnectorProtocol):
 
         try:
             # consequent, not in parallel
-            results = [
-                await (
-                    await self.session.post(
-                        self.runpoint,
-                        json={
-                            "client": "local",
-                            "tgt": deployment.node.name,
-                            "fun": "cmd.run",
-                            "arg": [command],
-                            "username": self.username,
-                            "password": self.password,
-                            "eauth": self.eauth,
-                            "full_return": True,
-                        },
-                    ).json()
-                )
-                .get("return", [{}])[0]
-                for command in deployment.environment_definition.commands
-            ]
+            results = []
+            for command in deployment.environment_definition.commands:
+                async with self.session.post(
+                    self.runpoint,
+                    json={
+                        "client": "local",
+                        "tgt": deployment.node.name,
+                        "fun": "cmd.run",
+                        "arg": [command],
+                        "username": self.username,
+                        "password": self.password,
+                        "eauth": self.eauth,
+                        "full_return": True,
+                    },
+                ) as response:
+                    salt_return = await response.json()
+                    self.logger.debug(salt_return)
+                    salt_return = salt_return.get("return", [{}])[0]
+                    results.append(salt_return)
         except Exception as e:
             self.logger.error(
                 f"Exception during deployment of executor {deployment.executor_id}, node {deployment.node}: {e}"
