@@ -216,9 +216,8 @@ class SaltConnector(NetunicornConnectorProtocol):
                             "eauth": self.eauth,
                             "full_return": True,
                         },
-                    )
+                    ).json()
                 )
-                .json()
                 .get("return", [{}])[0]
                 for command in deployment.environment_definition.commands
             ]
