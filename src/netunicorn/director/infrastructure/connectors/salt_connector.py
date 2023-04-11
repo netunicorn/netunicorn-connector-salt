@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 
 import aiohttp
 import yaml
@@ -13,10 +13,10 @@ from netunicorn.base.environment_definitions import DockerImage, ShellExecution
 from netunicorn.base.nodes import CountableNodePool, Node
 from returns.result import Failure, Result, Success
 
-from netunicorn.director.infrastructure.connectors.protocol import (
+from netunicorn.director.base.connectors.protocol import (
     NetunicornConnectorProtocol,
 )
-from netunicorn.director.infrastructure.connectors.types import StopExecutorRequest
+from netunicorn.director.base.connectors.types import StopExecutorRequest
 
 
 class SaltConnector(NetunicornConnectorProtocol):
@@ -65,7 +65,13 @@ class SaltConnector(NetunicornConnectorProtocol):
         await self.session.close()
         return
 
-    async def get_nodes(self, username: str, *args, **kwargs) -> CountableNodePool:
+    async def get_nodes(
+            self,
+            username: str,
+            authentication_context: Optional[dict[str, str]] = None,
+            *args: Any,
+            **kwargs: Any,
+    ) -> CountableNodePool:
         try:
             (
                 await self.session.post(
@@ -248,8 +254,10 @@ class SaltConnector(NetunicornConnectorProtocol):
         username: str,
         experiment_id: str,
         deployments: list[Deployment],
-        *args,
-        **kwargs,
+        deployment_context: Optional[dict[str, str]] = None,
+        authentication_context: Optional[dict[str, str]] = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> dict[str, Result[None, str]]:
         docker_deployments = []
         shell_deployments = []
@@ -435,8 +443,10 @@ class SaltConnector(NetunicornConnectorProtocol):
         username: str,
         experiment_id: str,
         deployments: list[Deployment],
-        *args,
-        **kwargs,
+        execution_context: Optional[dict[str, str]] = None,
+        authentication_context: Optional[dict[str, str]] = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> dict[str, Result[None, str]]:
 
         keys = [deployment.executor_id for deployment in deployments]
@@ -457,7 +467,13 @@ class SaltConnector(NetunicornConnectorProtocol):
         return results
 
     async def stop_executors(
-        self, username: str, requests_list: list[StopExecutorRequest], *args, **kwargs
+        self,
+        username: str,
+        requests_list: list[StopExecutorRequest],
+        cancellation_context: Optional[dict[str, str]],
+        authentication_context: Optional[dict[str, str]] = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> dict[str, Result[None, str]]:
 
         try:
@@ -484,6 +500,51 @@ class SaltConnector(NetunicornConnectorProtocol):
             return {request["node_name"]: Failure(str(e)) for request in requests_list}
 
         return {request["node_name"]: Success(None) for request in requests_list}
+
+    async def cleanup(
+            self,
+            experiment_id: str,
+            deployments: list[Deployment],
+            *args: Any,
+            **kwargs: Any
+    ) -> None:
+        deployments = [deployment for deployment in deployments if isinstance(deployment.environment_definition, DockerImage)]
+
+        # stop containers
+        for deployment in deployments:
+            try:
+                await self.session.post(
+                    self.runpoint,
+                    json={
+                        "client": "local",
+                        "tgt": deployment.node.name,
+                        "fun": "cmd.run",
+                        "arg": [f"docker stop {deployment.executor_id}; docker rm {deployment.executor_id}"],
+                        "username": self.username,
+                        "password": self.password,
+                        "eauth": self.eauth,
+                    },
+                )
+            except Exception as e:
+                self.logger.exception(f"Error stopping container: {e}")
+
+        # remove images
+        for deployment in deployments:
+            try:
+                await self.session.post(
+                    self.runpoint,
+                    json={
+                        "client": "local",
+                        "tgt": deployment.node.name,
+                        "fun": "cmd.run",
+                        "arg": [f"docker rmi {deployment.environment_definition.image}"],
+                        "username": self.username,
+                        "password": self.password,
+                        "eauth": self.eauth,
+                    },
+                )
+            except Exception as e:
+                self.logger.exception(f"Error removing image: {e}")
 
 
 async def debug():
