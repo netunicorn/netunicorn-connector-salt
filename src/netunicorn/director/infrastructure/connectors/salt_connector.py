@@ -37,7 +37,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 self.config = yaml.safe_load(f)
 
         self.PUBLIC_GRAINS: list[str] = self.config.get(
-            "netunicorn.connector.salt.public_grains", ["location", "osarch", "kernel"]
+            "netunicorn.connector.salt.public_grains", ["location", "osarch", "kernel", "netunicorn-environments"]
         )
 
         self.endpoint = self.config.get(
@@ -115,6 +115,8 @@ class SaltConnector(NetunicornConnectorProtocol):
                 name=node_name,
                 properties=node_grains,
             )
+            if "netunicorn-environments" in instance.properties and len(instance.properties["netunicorn-environments"]) == 0:
+                del instance.properties["netunicorn-environments"]
             architecture = f'{instance.properties.get("kernel", "").lower()}/{instance.properties.get("osarch", "").lower()}'
             try:
                 instance.architecture = Architecture(architecture)
