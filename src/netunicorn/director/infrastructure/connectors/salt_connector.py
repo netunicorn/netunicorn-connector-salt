@@ -30,6 +30,10 @@ class SaltConnector(NetunicornConnectorProtocol):
         self.connector_name = connector_name
         self.config_file = config_file
         self.netunicorn_gateway = netunicorn_gateway
+        if not logger:
+            logging.basicConfig(level=logging.DEBUG)
+            logger = logging.getLogger(__name__)
+        self.logger = logger
 
         self.config = {}
         if config_file:
@@ -39,20 +43,18 @@ class SaltConnector(NetunicornConnectorProtocol):
         self.PUBLIC_GRAINS: list[str] = self.config.get(
             "netunicorn.connector.salt.public_grains", ["location", "osarch", "kernel", "netunicorn-environments"]
         )
+        self.logger.debug(f"Grains: {self.PUBLIC_GRAINS}")
 
         self.endpoint = self.config.get(
             "netunicorn.connector.salt.endpoint"
         ).removesuffix("/")
+        self.logger.debug(f"Endpoint: {self.endpoint}")
+
         self.runpoint = self.endpoint + "/run"
         self.username = self.config.get("netunicorn.connector.salt.username")
         self.password = self.config.get("netunicorn.connector.salt.password")
         self.eauth = self.config.get("netunicorn.connector.salt.eauth")
         self.session = None
-
-        if not logger:
-            logging.basicConfig(level=logging.DEBUG)
-            logger = logging.getLogger(__name__)
-        self.logger = logger
 
     async def initialize(self) -> None:
         self.session = aiohttp.ClientSession(headers={"Accept": "application/json"})
