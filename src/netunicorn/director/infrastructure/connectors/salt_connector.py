@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Union, cast
 
 import aiohttp
 import yaml
@@ -166,7 +166,18 @@ class SaltConnector(NetunicornConnectorProtocol):
 
         results: dict[str, Result[None, str]] = {}
         for deployment in deployments_list:
-            if salt_return.get(deployment.node.name, {}).get("retcode", 1) != 0:
+            deployment_result: Union[bool, dict] = salt_return.get(deployment.node.name, {})
+            if isinstance(deployment_result, bool):
+                results[deployment.executor_id] = Failure(
+                    "Salt returned False as a result of command without any error message"
+                )
+                self.logger.error(
+                    f"Error during deployment of executor {deployment.executor_id}, "
+                    f"node {deployment.node}: {str(salt_return.get(deployment.node.name, ''))}"
+                )
+                continue
+
+            if isinstance(deployment_result, bool) and deployment_result.get("retcode", 1) != 0:
                 results[deployment.executor_id] = Failure(
                     str(salt_return.get(deployment.node.name, ""))
                 )
@@ -174,11 +185,12 @@ class SaltConnector(NetunicornConnectorProtocol):
                     f"Error during deployment of executor {deployment.executor_id}, "
                     f"node {deployment.node}: {str(salt_return.get(deployment.node.name, ''))}"
                 )
-            else:
-                results[deployment.executor_id] = Success(None)
-                self.logger.debug(
-                    f"Deployment of executor {deployment.executor_id} to node {deployment.node} successful"
-                )
+                continue
+
+            results[deployment.executor_id] = Success(None)
+            self.logger.debug(
+                f"Deployment of executor {deployment.executor_id} to node {deployment.node} successful"
+            )
         self.logger.debug(f"Finished deployment of {image}, results: {results}")
         return results
 
@@ -385,7 +397,7 @@ class SaltConnector(NetunicornConnectorProtocol):
             result = result['jid']
         except Exception as e:
             self.logger.error(
-                f"Exception during deployment.\n"
+                f"Exception during execution start.\n"
                 f"Experiment id: {experiment_id}\n"
                 f"Error: {e}\n"
                 f"Deployment: {deployment}"
