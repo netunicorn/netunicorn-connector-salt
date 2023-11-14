@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from collections import defaultdict
-from typing import Optional, Tuple, Any, Union, cast
+from typing import Optional, Tuple, Any, Union
 
 import aiohttp
 import yaml
@@ -56,6 +57,10 @@ class SaltConnector(NetunicornConnectorProtocol):
         self.eauth = self.config.get("netunicorn.connector.salt.eauth")
         self.session = None
 
+        self.node_cache: CountableNodePool | None = None
+        self.node_cache_updated: datetime | None = None
+        self.node_cache_timeout_minutes = self.config.get("netunicorn.connector.salt.node_cache_timeout_minutes", 5)
+
     async def initialize(self) -> None:
         self.session = aiohttp.ClientSession(headers={"Accept": "application/json"})
         return
@@ -74,6 +79,17 @@ class SaltConnector(NetunicornConnectorProtocol):
             *args: Any,
             **kwargs: Any,
     ) -> CountableNodePool:
+
+        # as we don't use yet username or auth context in this method,
+        # we can cache the nodes between calls even for different users
+        if (
+                self.node_cache and
+                self.node_cache_updated and
+                (datetime.now() - self.node_cache_updated).total_seconds() < self.node_cache_timeout_minutes * 60
+        ):
+            self.logger.debug(f"Returning node pool from cache, length: {len(self.node_cache)}")
+            return self.node_cache
+
         try:
             (
                 await self.session.post(
@@ -129,7 +145,10 @@ class SaltConnector(NetunicornConnectorProtocol):
                 instance.architecture = Architecture.UNKNOWN
             node_pool.append(instance)
         self.logger.debug(f"Returned node pool of length: {len(node_pool)}")
-        return CountableNodePool(node_pool)
+        result = CountableNodePool(node_pool)
+        self.node_cache = result
+        self.node_cache_updated = datetime.now()
+        return result
 
     async def _start_deploying_docker_image(
         self, experiment_id: str, deployments_list: list[Deployment], image: str
@@ -177,7 +196,7 @@ class SaltConnector(NetunicornConnectorProtocol):
                 )
                 continue
 
-            if isinstance(deployment_result, bool) and deployment_result.get("retcode", 1) != 0:
+            if isinstance(deployment_result, bool) or deployment_result.get("retcode", 1) != 0:
                 results[deployment.executor_id] = Failure(
                     str(salt_return.get(deployment.node.name, ""))
                 )
