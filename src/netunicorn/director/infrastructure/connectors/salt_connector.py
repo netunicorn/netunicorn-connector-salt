@@ -42,7 +42,13 @@ class SaltConnector(NetunicornConnectorProtocol):
                 self.config = yaml.safe_load(f)
 
         self.PUBLIC_GRAINS: list[str] = self.config.get(
-            "netunicorn.connector.salt.public_grains", ["location", "osarch", "kernel", "netunicorn-environments"]
+            "netunicorn.connector.salt.public_grains", [
+                "location",
+                "osarch",
+                "kernel",
+                "netunicorn-environments",
+                "netunicorn-access-tags"
+            ]
         )
         self.logger.debug(f"Grains: {self.PUBLIC_GRAINS}")
 

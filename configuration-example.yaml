@@ -3,6 +3,8 @@ netunicorn.connector.salt.public_grains:
   - location
   - osarch
   - kernel
+  - netunicorn-access-tags
+  - netunicorn-environments
 
 netunicorn.connector.salt.endpoint: "https://infra.example.com/saltapi"
 netunicorn.connector.salt.username: "username"
