@@ -27,6 +27,8 @@ class SaltConnector(NetunicornConnectorProtocol):
         config_file: str | None,
         netunicorn_gateway: str,
         logger: Optional[logging.Logger] = None,
+        *args: Any,
+        **kwargs: Any,
     ):
         self.connector_name = connector_name
         self.config_file = config_file
@@ -67,14 +69,14 @@ class SaltConnector(NetunicornConnectorProtocol):
         self.node_cache_updated: datetime | None = None
         self.node_cache_timeout_minutes = self.config.get("netunicorn.connector.salt.node_cache_timeout_minutes", 5)
 
-    async def initialize(self) -> None:
+    async def initialize(self, *args, **kwargs) -> None:
         self.session = aiohttp.ClientSession(headers={"Accept": "application/json"})
         return
 
-    async def health(self) -> Tuple[bool, str]:
+    async def health(self, *args, **kwargs) -> Tuple[bool, str]:
         return True, "OK"
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, *args, **kwargs) -> None:
         await self.session.close()
         return
 
@@ -351,6 +353,10 @@ class SaltConnector(NetunicornConnectorProtocol):
             for k, v in deployment.environment_definition.runtime_context.environment_variables.items()
         )
 
+        network_command = ""
+        if deployment.environment_definition.runtime_context.network:
+            network_command = f"--network {deployment.environment_definition.runtime_context.network}"
+
         additional_arguments = " ".join(
             deployment.environment_definition.runtime_context.additional_arguments
         )
@@ -363,7 +369,7 @@ class SaltConnector(NetunicornConnectorProtocol):
             )
 
         runcommand = (
-            f"docker run -d {env_vars} {ports} --name {deployment.executor_id} "
+            f"docker run -d {env_vars} {ports} --name {deployment.executor_id} {network_command} "
             f"{additional_arguments} {deployment.environment_definition.image}"
         )
         return runcommand
